@@ -1,6 +1,6 @@
 {
   "name": "niu-image-gen",
-  "version": "1.3.0+codex.20260723133108",
+  "version": "1.3.1+codex.20260723133746",
   "description": "Generate and edit images through configurable APIs, discover upstream models, and save the user's selected image model.",
   "author": {
     "name": "BORAWONG and Big-Molecule",

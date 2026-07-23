@@ -311,6 +311,10 @@ this JSON instead of displaying it verbatim.
 
 ### Step 3: Present choices
 
+Treat the configured model-list endpoint as the authoritative source for the
+question "which models does this API expose?" Once `--list-models` succeeds,
+answer the user immediately from that response.
+
 Show:
 
 1. The queried models endpoint.
@@ -320,8 +324,23 @@ Show:
 
 The `likelyImageModel` value is only a name-based heuristic. Explicitly tell the
 user that `/v1/models` usually lists accessible models but may not report model
-capabilities, so a candidate still needs a real generation request to confirm
-image support.
+capabilities. Do not turn that limitation into an investigation.
+
+### Strict no-search rule
+
+- Do not browse the web, search the relay provider's website, inspect search
+  engine results, or call unrelated tools after `--list-models` succeeds.
+- Do not search for documentation about returned model IDs or the currently
+  configured model unless the user explicitly asks for that separate research.
+- Do not delay the answer because `selectedModelAvailable` is `false`.
+- If the configured model is absent from the public list, say only that it is
+  not exposed by the current model-list response and may be a hidden/internal
+  alias. Do not attempt to prove or disprove the alias.
+- Do not run a generation request merely to answer which models are listed.
+  Test a model only after the user selects it or explicitly requests a
+  compatibility test.
+- Never supplement, replace, or merge the API-returned model list with models
+  found on the public web.
 
 If the response contains many models, show all likely image candidates first
 and summarize the remaining count. Offer to filter the remaining IDs by a user

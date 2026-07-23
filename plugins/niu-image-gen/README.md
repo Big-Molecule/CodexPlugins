@@ -89,8 +89,12 @@ list, and whether the currently selected model appears in the returned catalog.
 
 `likelyImageModels` is based only on common image-related words in model IDs.
 The standard model-list response provides basic model information but does not
-reliably describe image-generation capabilities. Always let the user choose,
-and confirm uncertain models with a real generation request.
+reliably describe image-generation capabilities. The plugin treats the
+configured model-list response as authoritative for the models exposed by that
+API and does not search the public web for aliases or additional models.
+
+A generation test should happen only after the user selects a model or
+explicitly asks to test compatibility.
 
 Save the selected model without changing the rest of the API connection:
 

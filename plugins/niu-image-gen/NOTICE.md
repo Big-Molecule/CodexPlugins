@@ -22,6 +22,8 @@ Modified on 2026-07-23:
 - Added backward-compatible migration from the legacy top-level `apiKey`.
 - Added configurable model-list paths, upstream model discovery, image-model
   candidate hints, and user-selected model persistence.
+- Restricted successful model discovery to the configured API response, without
+  unsolicited web searches or alias investigations.
 - Restricted the local configuration file to owner access where the operating system supports it.
 - Clarified that locally stored API credentials are sent to the configured third-party API during requests.
 
