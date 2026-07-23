@@ -1,6 +1,6 @@
 ---
 name: "niu-image-gen"
-description: "Generate or edit images using configurable OpenAI-compatible image API endpoints. Trigger when the user wants to create, draw, generate, or edit images via Niu Image Gen, configure a custom image API host, port, path, key, or model, run batch image generation, save generated images, or modify an existing image. Do not use for the built-in image_gen tool or SVG/vector work."
+description: "Generate or edit images using configurable OpenAI-compatible image API endpoints. Trigger when the user wants to create, draw, generate, or edit images via Niu Image Gen, query which models an upstream endpoint exposes, select or configure an image model, configure a custom API host, port, path, key, or model, run batch image generation, save generated images, or modify an existing image. Do not use for the built-in image_gen tool or SVG/vector work."
 ---
 
 # Niu Image Gen 🎨
@@ -23,7 +23,7 @@ Resolve the script from this skill's installed location:
 
 ## 🔴 输出规则（最高优先级，所有 Branch 都必须遵守）
 
-1. **脚本输出 = 最终展示内容**：运行脚本后，将脚本的 stdout 输出**原样展示**给用户。不要改写、省略、翻译、合并或重新组织脚本的输出。
+1. **脚本输出 = 最终展示内容**：运行脚本后，将脚本的 stdout 输出**原样展示**给用户。不要改写、省略、翻译、合并或重新组织脚本的输出。唯一例外是 `--list-models`：它返回 JSON，必须解析后以简洁的编号列表展示。
 2. **禁止代码块包裹**：脚本输出是格式化好的纯文本，**绝对不要**用 ` ``` ` 代码块包裹。直接作为普通消息文本展示。
 3. **交互提示 = 原样输出**：本文件中所有 `「📋 原样输出」` 标记后面的引用块（`>` 开头），必须**逐字输出**给用户，包括所有 emoji、表格、分隔线。不得用自己的话重新表述。
 4. **禁止纯文本降级**：不要去掉 emoji，不要把表格改成逗号列表，不要把多行合并成一行。
@@ -48,7 +48,10 @@ The output is JSON:
     "port": null,
     "path": "/v1/images/generations",
     "endpoint": "https://api.iiiiitoken.com/v1/images/generations",
-    "model": "gpt-image-2-x"
+    "modelsPath": "/v1/models",
+    "modelsEndpoint": "https://api.iiiiitoken.com/v1/models",
+    "model": "gpt-image-2-x",
+    "modelSource": "config.api.model"
   },
   "hasKey": true,
   "keySource": "config.api.key",
@@ -64,15 +67,16 @@ Fields can be `null` if not yet configured.
 
 | # | Condition | Go to |
 |---|-----------|-------|
-| 1 | `hasKey` is `false` | → **Branch A**: First-time Wizard |
-| 2 | `hasKey` is `true` AND `quickMode` is `null` | → **Branch A2**: Quick Mode Setup |
-| 3 | User intent is to modify config (keywords: 修改配置、设置、更改参数、配置、settings) | → **Branch C**: Modify Config |
-| 4 | User intent is batch generation (keywords: 批量、batch) | → **Branch D**: Batch Mode |
-| 5 | User intent is to edit an existing image (keywords: 编辑、修改图片、改一下、换背景、去掉、加上、变成、改成、edit、remove、replace — AND references an image or a previous generation exists) | → **Branch F**: Edit Image |
-| 6 | `quickMode` exists AND user message contains a prompt | → **Branch B**: Quick Mode |
-| 7 | `quickMode` exists AND user message has no clear prompt | → **Branch E**: Help |
+| 1 | User asks to list/query/select available models (keywords: 有哪些模型、查询模型、模型列表、选择模型、list models) | → **Branch G**: Discover Models |
+| 2 | `hasKey` is `false` | → **Branch A**: First-time Wizard |
+| 3 | `hasKey` is `true` AND `quickMode` is `null` | → **Branch A2**: Quick Mode Setup |
+| 4 | User intent is to modify config (keywords: 修改配置、设置、更改参数、配置、settings) | → **Branch C**: Modify Config |
+| 5 | User intent is batch generation (keywords: 批量、batch) | → **Branch D**: Batch Mode |
+| 6 | User intent is to edit an existing image (keywords: 编辑、修改图片、改一下、换背景、去掉、加上、变成、改成、edit、remove、replace — AND references an image or a previous generation exists) | → **Branch F**: Edit Image |
+| 7 | `quickMode` exists AND user message contains a prompt | → **Branch B**: Quick Mode |
+| 8 | `quickMode` exists AND user message has no clear prompt | → **Branch E**: Help |
 
-**IMPORTANT**: Rules are ORDERED. Rule 3 beats Rule 6 — if the user says "修改配置", go to Branch C even though quickMode exists. Rule 4 beats Rule 6 — "批量生成猫" goes to Branch D, not Branch B. Rule 5 beats Rule 6 — "把背景换成海边" after a generation goes to Branch F, not Branch B.
+**IMPORTANT**: Rules are ORDERED. Model discovery beats normal configuration and generation. Configuration beats ordinary generation. Batch and edit intent beat quick generation.
 
 ---
 
@@ -118,12 +122,17 @@ node "$SCRIPT" --set-api \
   --host <DOMAIN_OR_IP> \
   --port <PORT|default> \
   --path </REQUEST_PATH> \
+  --models-path </MODELS_PATH> \
   --model <MODEL> \
   --key <USER_KEY>
 ```
 
 `host` must not contain a scheme, path, or port. Use `default` to omit an
 explicit port and let the protocol choose it.
+
+If the user does not know the model ID, omit `--model`, save the endpoint, and
+continue to **Branch G** so the user can choose from the upstream model list.
+The default model-list path is `/v1/models`.
 
 **直接展示脚本输出，不要改写。** 脚本会输出格式化的确认信息。
 
@@ -243,6 +252,7 @@ The user wants to change settings. First run `--get-config` if not already done 
 > | ⚡ 快速模式 | [Q] | [R] | 每次 [N] 张 |
 > | 📦 批量模式 | [Q or 未设置] | [R or —] | 并发 [N or —] |
 > | 🔌 API Endpoint | [endpoint] | | |
+> | 📚 Models Endpoint | [modelsEndpoint] | | |
 > | 🧠 API Model | [model] | | |
 > | 🔑 API Key | [preview] | [keySource] | |
 >
@@ -261,12 +271,79 @@ Based on user choice:
 - **1️⃣ Quick Mode**: Run W2 → W3 → W4 → W5 from Branch A2. This overwrites the existing quickMode config.
 - **2️⃣ Batch Mode**: Run the batch setup flow from Branch D (first-time section). This overwrites or creates batchMode config.
 - **3️⃣ API connection**: Ask which fields should change: protocol, host, port,
-  path, model, and optionally key. Preserve fields the user does not change.
+  generation path, models path, model, and optionally key. Preserve fields the user does not change.
   Run `--set-api` with only the changed flags. **直接展示脚本输出。**
 - **4️⃣ API Key only**: Ask for the new key and run `--set-key <NEW_KEY>`.
   **直接展示脚本输出。**
 
 After saving, the script output already includes confirmation — do not add extra summary.
+
+---
+
+## Branch G: 🔎 Discover and Select Models
+
+Use this branch when the user asks which models the configured upstream API
+exposes, does not know the image model ID, or wants to change models by choosing
+from a list.
+
+### Step 1: Read the current connection
+
+Run:
+
+```bash
+node "$SCRIPT" --get-config
+```
+
+Tell the user which `modelsEndpoint` will be queried. Do not display the full API
+key.
+
+### Step 2: Query the upstream model catalog
+
+Run:
+
+```bash
+node "$SCRIPT" --list-models
+```
+
+This command returns JSON with `modelsEndpoint`, `selectedModel`,
+`selectedModelAvailable`, `count`, `likelyImageModels`, and `models[]`. Parse
+this JSON instead of displaying it verbatim.
+
+### Step 3: Present choices
+
+Show:
+
+1. The queried models endpoint.
+2. A numbered **可能的生图模型** section using `likelyImageModels`.
+3. A numbered **其他可用模型** section for the remaining IDs.
+4. `ownedBy` when present.
+
+The `likelyImageModel` value is only a name-based heuristic. Explicitly tell the
+user that `/v1/models` usually lists accessible models but may not report model
+capabilities, so a candidate still needs a real generation request to confirm
+image support.
+
+If the response contains many models, show all likely image candidates first
+and summarize the remaining count. Offer to filter the remaining IDs by a user
+provided keyword rather than flooding the conversation.
+
+### Step 4: Save the user's selection
+
+After the user chooses an exact model ID, run:
+
+```bash
+node "$SCRIPT" --set-model "<SELECTED_MODEL_ID>"
+```
+
+Display the script confirmation verbatim. Then run `--get-config` once and
+confirm that `api.model` matches the selected ID.
+
+If `api.modelSource` is `NIU_IMAGE_GEN_API_MODEL`, explain that the environment
+variable still overrides the saved model and must be changed or removed before
+the configuration-file selection becomes active.
+
+Do not silently select a model just because its name contains `image`, `flux`,
+`dall-e`, or another image-related term.
 
 ---
 
@@ -487,18 +564,24 @@ These rules apply to ALL branches:
 | Timeout (generation 220s / edit 250s) | Report and offer to retry. |
 | Missing API key | Guide through `--set-key` setup (Branch A W1). |
 | Invalid protocol, host, port, path, or model | Explain the invalid field and return to Branch C API connection setup. |
+| Models endpoint returns 401/403 | Explain that model discovery requires a valid key for this upstream service. |
+| Models endpoint returns 404 | Ask for the upstream model-list path and save it with `--set-api --models-path`. |
+| Model list has no obvious image candidates | Show the available IDs without guessing; ask which model the provider documents for images. |
 | API response has no `data[0].b64_json` | Explain that the configured endpoint is not compatible with the plugin response contract. |
 
 ## Hard constraints
 
-- API protocol, host, port, path, key, and model are configurable under the
+- API protocol, host, port, generation path, models path, key, and model are configurable under the
   `api` object in `~/.codex/niu-image-gen-config.json`.
 - The endpoint must accept the plugin's OpenAI-compatible image request and
   return base64 image data under `data[].b64_json`.
 - Protocol must be `http` or `https`; port must be `1` to `65535` or omitted.
 - Environment variables `NIU_IMAGE_GEN_API_PROTOCOL`, `NIU_IMAGE_GEN_API_HOST`,
   `NIU_IMAGE_GEN_API_PORT`, `NIU_IMAGE_GEN_API_PATH`,
-  `NIU_IMAGE_GEN_API_KEY`, and `NIU_IMAGE_GEN_API_MODEL` override saved values.
+  `NIU_IMAGE_GEN_API_MODELS_PATH`, `NIU_IMAGE_GEN_API_KEY`, and
+  `NIU_IMAGE_GEN_API_MODEL` override saved values.
+- `--list-models` queries the configured models endpoint. Model-name heuristics
+  are suggestions only and must not be treated as capability metadata.
 - `--set-key` and `--set-api --key` store the key in plaintext at
   `~/.codex/niu-image-gen-config.json`; requests send it to the configured API.
 - **Never display the user's full API key in chat.**

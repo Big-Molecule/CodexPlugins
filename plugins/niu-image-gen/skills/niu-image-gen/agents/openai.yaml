@@ -1,4 +1,4 @@
 interface:
   display_name: "Niu Image Gen"
-  short_description: "Generate images with custom API endpoints and batch mode"
+  short_description: "Discover upstream image models and generate images"
   default_prompt: "I want to generate some images"

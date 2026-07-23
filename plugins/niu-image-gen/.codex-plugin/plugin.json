@@ -1,7 +1,7 @@
 {
   "name": "niu-image-gen",
-  "version": "1.2.0+codex.20260723101411",
-  "description": "Generate and edit images through configurable OpenAI-compatible API endpoints, with batch workflows and local settings.",
+  "version": "1.3.0+codex.20260723133108",
+  "description": "Generate and edit images through configurable APIs, discover upstream models, and save the user's selected image model.",
   "author": {
     "name": "BORAWONG and Big-Molecule",
     "url": "https://github.com/Big-Molecule"
@@ -19,8 +19,8 @@
   "skills": "./skills/",
   "interface": {
     "displayName": "Niu Image Gen",
-    "shortDescription": "Image generation with configurable API endpoints and batch mode.",
-    "longDescription": "Generate and edit images through configurable OpenAI-compatible APIs. Customize protocol, host, port, request path, API key, and model while retaining quality controls, batch generation, concurrent processing, and local settings.",
+    "shortDescription": "Image generation with API model discovery and batch mode.",
+    "longDescription": "Generate and edit images through configurable OpenAI-compatible APIs. Query the upstream model catalog, highlight likely image-model candidates, let the user select a model, and save it alongside protocol, host, port, request paths, API key, quality controls, and batch settings.",
     "developerName": "BORAWONG / Big-Molecule",
     "category": "Productivity",
     "capabilities": [

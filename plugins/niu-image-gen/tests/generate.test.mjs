@@ -16,6 +16,7 @@ const API_ENV_KEYS = [
   "NIU_IMAGE_GEN_API_HOST",
   "NIU_IMAGE_GEN_API_PORT",
   "NIU_IMAGE_GEN_API_PATH",
+  "NIU_IMAGE_GEN_API_MODELS_PATH",
   "NIU_IMAGE_GEN_API_KEY",
   "NIU_IMAGE_GEN_API_MODEL",
 ];
@@ -89,6 +90,8 @@ test("saves and reports a custom API endpoint", async (t) => {
       "9001",
       "--path",
       "custom/images",
+      "--models-path",
+      "custom/models",
       "--model",
       "custom-image-model",
       "--key",
@@ -106,6 +109,7 @@ test("saves and reports a custom API endpoint", async (t) => {
     host: "127.0.0.1",
     port: 9001,
     path: "/custom/images",
+    modelsPath: "/custom/models",
     key: "custom-key-123456",
     model: "custom-image-model",
   });
@@ -114,6 +118,10 @@ test("saves and reports a custom API endpoint", async (t) => {
   assert.equal(getResult.code, 0, getResult.stderr);
   const reported = JSON.parse(getResult.stdout);
   assert.equal(reported.api.endpoint, "http://127.0.0.1:9001/custom/images");
+  assert.equal(
+    reported.api.modelsEndpoint,
+    "http://127.0.0.1:9001/custom/models"
+  );
   assert.equal(reported.api.model, "custom-image-model");
   assert.equal(reported.keySource, "config.api.key");
   assert.equal(reported.hasKey, true);
@@ -128,6 +136,7 @@ test("environment variables override saved API settings", async (t) => {
       host: "saved.example.com",
       port: null,
       path: "/saved",
+      modelsPath: "/saved-models",
       key: "saved-key",
       model: "saved-model",
     },
@@ -140,6 +149,7 @@ test("environment variables override saved API settings", async (t) => {
       NIU_IMAGE_GEN_API_HOST: "localhost",
       NIU_IMAGE_GEN_API_PORT: "8123",
       NIU_IMAGE_GEN_API_PATH: "/override",
+      NIU_IMAGE_GEN_API_MODELS_PATH: "/override-models",
       NIU_IMAGE_GEN_API_KEY: "environment-key",
       NIU_IMAGE_GEN_API_MODEL: "environment-model",
     },
@@ -148,7 +158,12 @@ test("environment variables override saved API settings", async (t) => {
   assert.equal(result.code, 0, result.stderr);
   const reported = JSON.parse(result.stdout);
   assert.equal(reported.api.endpoint, "http://localhost:8123/override");
+  assert.equal(
+    reported.api.modelsEndpoint,
+    "http://localhost:8123/override-models"
+  );
   assert.equal(reported.api.model, "environment-model");
+  assert.equal(reported.api.modelSource, "NIU_IMAGE_GEN_API_MODEL");
   assert.equal(reported.keySource, "NIU_IMAGE_GEN_API_KEY");
 });
 
@@ -245,6 +260,113 @@ test("sends requests to the configured host, port, path, key, and model", async 
     },
   });
   assert.match(result.stdout, /fake-png|生成中|test prompt/);
+});
+
+
+test("queries models from the configured models endpoint", async (t) => {
+  const home = await createTestHome(t);
+  let received;
+
+  const server = createServer((request, response) => {
+    received = {
+      method: request.method,
+      url: request.url,
+      authorization: request.headers.authorization,
+    };
+    response.writeHead(200, { "Content-Type": "application/json" });
+    response.end(
+      JSON.stringify({
+        object: "list",
+        data: [
+          { id: "text-model", owned_by: "relay" },
+          { id: "custom-image-v2", owned_by: "relay" },
+          { id: "gpt-image-compatible", owned_by: "relay" },
+        ],
+      })
+    );
+  });
+  await new Promise((resolve) => {
+    server.listen(0, "127.0.0.1", resolve);
+  });
+  t.after(() => new Promise((resolve) => server.close(resolve)));
+
+  const address = server.address();
+  assert.notEqual(address, null);
+  await writeConfig(home, {
+    api: {
+      protocol: "http",
+      host: "127.0.0.1",
+      port: address.port,
+      path: "/generate",
+      modelsPath: "/relay/v1/models",
+      key: "models-key",
+      model: "old-model",
+    },
+  });
+
+  const result = await runCli(["--list-models"], { home });
+  assert.equal(result.code, 0, result.stderr);
+  assert.deepEqual(received, {
+    method: "GET",
+    url: "/relay/v1/models",
+    authorization: "Bearer models-key",
+  });
+
+  const payload = JSON.parse(result.stdout);
+  assert.equal(payload.count, 3);
+  assert.equal(payload.selectedModel, "old-model");
+  assert.equal(payload.selectedModelAvailable, false);
+  assert.deepEqual(payload.likelyImageModels, [
+    "custom-image-v2",
+    "gpt-image-compatible",
+  ]);
+  assert.deepEqual(
+    payload.models.map((model) => model.id),
+    ["custom-image-v2", "gpt-image-compatible", "text-model"]
+  );
+});
+
+
+test("sets a selected model without changing other API settings", async (t) => {
+  const home = await createTestHome(t);
+  const configPath = await writeConfig(home, {
+    api: {
+      protocol: "https",
+      host: "relay.example.com",
+      port: 9443,
+      path: "/images",
+      modelsPath: "/models",
+      key: "preserved-key",
+      model: "old-model",
+    },
+    batchMode: {
+      quality: "2K",
+      ratio: "landscape",
+      concurrency: 3,
+    },
+  });
+
+  const result = await runCli(
+    ["--set-model", "selected-image-model"],
+    { home }
+  );
+  assert.equal(result.code, 0, result.stderr);
+
+  const config = JSON.parse(await readFile(configPath, "utf8"));
+  assert.deepEqual(config.api, {
+    protocol: "https",
+    host: "relay.example.com",
+    port: 9443,
+    path: "/images",
+    modelsPath: "/models",
+    key: "preserved-key",
+    model: "selected-image-model",
+  });
+  assert.deepEqual(config.batchMode, {
+    quality: "2K",
+    ratio: "landscape",
+    concurrency: 3,
+  });
 });
 
 

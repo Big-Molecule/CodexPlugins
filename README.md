@@ -10,7 +10,7 @@
 
 | 插件 | 功能 | 来源 |
 |------|------|------|
-| `niu-image-gen` | 通过可配置的兼容 API 生成、编辑和批量处理图片 | 基于 [borawong/AiMaMi](https://github.com/borawong/AiMaMi) 的 Apache-2.0 授权代码 |
+| `niu-image-gen` | 查询上游模型并通过可配置 API 生成、编辑和批量处理图片 | 基于 [borawong/AiMaMi](https://github.com/borawong/AiMaMi) 的 Apache-2.0 授权代码 |
 
 `niu-image-gen` 会把 API Key 保存在本机配置文件中，或从
 `NIU_IMAGE_GEN_API_KEY` 环境变量读取。协议、域名/IP、端口、请求路径和模型

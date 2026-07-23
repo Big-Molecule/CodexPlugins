@@ -13,6 +13,7 @@ const DEFAULT_API = Object.freeze({
   host: "api.iiiiitoken.com",
   port: null,
   path: "/v1/images/generations",
+  modelsPath: "/v1/models",
   model: "gpt-image-2-x",
 });
 const API_ENV = Object.freeze({
@@ -20,9 +21,12 @@ const API_ENV = Object.freeze({
   host: "NIU_IMAGE_GEN_API_HOST",
   port: "NIU_IMAGE_GEN_API_PORT",
   path: "NIU_IMAGE_GEN_API_PATH",
+  modelsPath: "NIU_IMAGE_GEN_API_MODELS_PATH",
   key: "NIU_IMAGE_GEN_API_KEY",
   model: "NIU_IMAGE_GEN_API_MODEL",
 });
+const IMAGE_MODEL_HINT =
+  /(image|dall[-_ ]?e|flux|sdxl|stable[-_ ]?diffusion|imagen|seedream|kolors|qwen[-_ ]?image|wan[-_ ]?image)/i;
 
 const SIZE_MATRIX = {
   "1K": { square: "1024x1024", landscape: "1536x1024", portrait: "1024x1536" },
@@ -125,9 +129,17 @@ function resolveApiConfig(cfg = loadConfig(), { useEnv = true } = {}) {
   const path = normalizePath(
     firstDefined(env[API_ENV.path], stored.path, DEFAULT_API.path)
   );
+  const modelsPath = normalizePath(
+    firstDefined(env[API_ENV.modelsPath], stored.modelsPath, DEFAULT_API.modelsPath)
+  );
   const model = normalizeModel(
     firstDefined(env[API_ENV.model], stored.model, DEFAULT_API.model)
   );
+  const modelSource = env[API_ENV.model]
+    ? API_ENV.model
+    : stored.model
+      ? "config.api.model"
+      : "default";
   const key = firstDefined(env[API_ENV.key], stored.key, cfg?.apiKey, null) || null;
   const keySource = env[API_ENV.key]
     ? API_ENV.key
@@ -139,8 +151,24 @@ function resolveApiConfig(cfg = loadConfig(), { useEnv = true } = {}) {
 
   const authority = port === null ? host : `${host}:${port}`;
   const endpoint = new URL(path, `${protocol}://${authority}/`).toString();
+  const modelsEndpoint = new URL(
+    modelsPath,
+    `${protocol}://${authority}/`
+  ).toString();
 
-  return { protocol, host, port, path, endpoint, key, keySource, model };
+  return {
+    protocol,
+    host,
+    port,
+    path,
+    endpoint,
+    modelsPath,
+    modelsEndpoint,
+    key,
+    keySource,
+    model,
+    modelSource,
+  };
 }
 
 function getApiConfig() {
@@ -152,6 +180,108 @@ function getApiConfig() {
     process.exit(1);
   }
   return api;
+}
+
+function apiForStorage(api) {
+  return {
+    protocol: api.protocol,
+    host: api.host,
+    port: api.port,
+    path: api.path,
+    modelsPath: api.modelsPath,
+    key: api.key,
+    model: api.model,
+  };
+}
+
+function normalizeModelRecord(value) {
+  if (typeof value === "string") {
+    return { id: value };
+  }
+  if (!value || typeof value !== "object") {
+    return null;
+  }
+  const id = value.id ?? value.name ?? value.model;
+  if (typeof id !== "string" || !id.trim()) {
+    return null;
+  }
+  return {
+    id: id.trim(),
+    ownedBy: value.owned_by ?? value.ownedBy ?? value.owner ?? null,
+    created: value.created ?? null,
+  };
+}
+
+function extractModels(payload) {
+  const rawModels = Array.isArray(payload)
+    ? payload
+    : Array.isArray(payload?.data)
+      ? payload.data
+      : Array.isArray(payload?.models)
+        ? payload.models
+        : null;
+  if (rawModels === null) {
+    throw new Error(
+      "Model-list response must be an array or contain a data/models array."
+    );
+  }
+
+  const seen = new Set();
+  const models = [];
+  for (const value of rawModels) {
+    const model = normalizeModelRecord(value);
+    if (!model || seen.has(model.id)) continue;
+    seen.add(model.id);
+    models.push({
+      ...model,
+      likelyImageModel: IMAGE_MODEL_HINT.test(model.id),
+    });
+  }
+  models.sort(
+    (left, right) =>
+      Number(right.likelyImageModel) - Number(left.likelyImageModel) ||
+      left.id.localeCompare(right.id)
+  );
+  return models;
+}
+
+async function queryModels(api) {
+  const headers = { Accept: "application/json" };
+  if (api.key) {
+    headers.Authorization = `Bearer ${api.key}`;
+  }
+  const response = await fetch(api.modelsEndpoint, {
+    method: "GET",
+    headers,
+  });
+  if (!response.ok) {
+    const body = await response.text();
+    let message = body;
+    try {
+      message = JSON.parse(body).error?.message || body;
+    } catch {}
+    throw new Error(
+      `Model query failed with HTTP ${response.status}: ${message}`
+    );
+  }
+
+  let payload;
+  try {
+    payload = await response.json();
+  } catch {
+    throw new Error("Model-list endpoint did not return valid JSON.");
+  }
+  const models = extractModels(payload);
+  return {
+    modelsEndpoint: api.modelsEndpoint,
+    selectedModel: api.model,
+    selectedModelAvailable: models.some((model) => model.id === api.model),
+    count: models.length,
+    likelyImageModels: models
+      .filter((model) => model.likelyImageModel)
+      .map((model) => model.id),
+    models,
+  };
 }
 
 function timestamp() {
@@ -392,16 +522,19 @@ function printUsage() {
 
 CONFIG:
   --get-config                              Show current config (JSON)
+  --list-models                             Query models from the configured models endpoint
+  --set-model <model-id>                    Save the selected image model
   --set-key <key>                           Save API key
   --set-api [--protocol http|https] [--host HOST] [--port PORT|default]
-            [--path PATH] [--model MODEL] [--key KEY]
+            [--path PATH] [--models-path PATH] [--model MODEL] [--key KEY]
                                               Save API endpoint, model, and optional key
   --set-quick-mode --quality Q --ratio R --count N   Save quick mode defaults
   --set-batch-mode --quality Q --ratio R --concurrency N   Save batch mode defaults
 
 API ENVIRONMENT OVERRIDES:
   NIU_IMAGE_GEN_API_PROTOCOL, NIU_IMAGE_GEN_API_HOST, NIU_IMAGE_GEN_API_PORT
-  NIU_IMAGE_GEN_API_PATH, NIU_IMAGE_GEN_API_KEY, NIU_IMAGE_GEN_API_MODEL
+  NIU_IMAGE_GEN_API_PATH, NIU_IMAGE_GEN_API_MODELS_PATH
+  NIU_IMAGE_GEN_API_KEY, NIU_IMAGE_GEN_API_MODEL
 
 GENERATE:
   --prompt "..."  [--quality Q] [--ratio R] [--count N] [--output-dir D]
@@ -430,12 +563,15 @@ function parseArgs(argv) {
   while (i < argv.length) {
     const a = argv[i];
     if      (a === "--get-config")                  args.flags.getConfig = true;
+    else if (a === "--list-models")                 args.flags.listModels = true;
+    else if (a === "--set-model" && argv[i + 1])    args.flags.setModel = argv[++i];
     else if (a === "--set-key" && argv[i + 1])      args.flags.setKey = argv[++i];
     else if (a === "--set-api")                      args.flags.setApi = true;
     else if (a === "--protocol" && argv[i + 1])      args.flags.protocol = argv[++i];
     else if (a === "--host" && argv[i + 1])          args.flags.host = argv[++i];
     else if (a === "--port" && argv[i + 1])          args.flags.port = argv[++i];
     else if (a === "--path" && argv[i + 1])          args.flags.apiPath = argv[++i];
+    else if (a === "--models-path" && argv[i + 1])   args.flags.modelsPath = argv[++i];
     else if (a === "--model" && argv[i + 1])         args.flags.model = argv[++i];
     else if (a === "--key" && argv[i + 1])           args.flags.apiKey = argv[++i];
     else if (a === "--set-quick-mode")               args.flags.setQuickMode = true;
@@ -476,7 +612,10 @@ async function main() {
         port: api.port,
         path: api.path,
         endpoint: api.endpoint,
+        modelsPath: api.modelsPath,
+        modelsEndpoint: api.modelsEndpoint,
         model: api.model,
+        modelSource: api.modelSource,
       },
       hasKey: !!api.key,
       keySource: api.keySource,
@@ -487,12 +626,42 @@ async function main() {
     process.exit(0);
   }
 
+  if (flags.listModels) {
+    const api = resolveApiConfig();
+    const result = await queryModels(api);
+    console.log(JSON.stringify(result, null, 2));
+    process.exit(0);
+  }
+
+  if (flags.setModel) {
+    const cfg = loadConfig() || {};
+    const current = resolveApiConfig(cfg, { useEnv: false });
+    cfg.api = apiForStorage({
+      ...current,
+      model: normalizeModel(flags.setModel),
+    });
+    delete cfg.apiKey;
+    saveConfig(cfg);
+    console.log([
+      "✅ 图片模型已更新！",
+      "",
+      `🧠 Model: ${cfg.api.model}`,
+      `🌐 Endpoint: ${current.endpoint}`,
+      `📁 Config: ${CONFIG_PATH}`,
+      ...(process.env[API_ENV.model]
+        ? [`⚠️ 当前环境变量 ${API_ENV.model} 仍会覆盖配置文件中的模型`]
+        : []),
+    ].join("\n"));
+    process.exit(0);
+  }
+
   if (flags.setApi) {
     const hasApiOption = [
       flags.protocol,
       flags.host,
       flags.port,
       flags.apiPath,
+      flags.modelsPath,
       flags.model,
       flags.apiKey,
     ].some((value) => value !== undefined);
@@ -508,24 +677,19 @@ async function main() {
       host: firstDefined(flags.host, current.host),
       port: flags.port === undefined ? current.port : normalizePort(flags.port),
       path: firstDefined(flags.apiPath, current.path),
+      modelsPath: firstDefined(flags.modelsPath, current.modelsPath),
       key: firstDefined(flags.apiKey, current.key),
       model: firstDefined(flags.model, current.model),
     };
     delete cfg.apiKey;
     const savedApi = resolveApiConfig(cfg, { useEnv: false });
-    cfg.api = {
-      protocol: savedApi.protocol,
-      host: savedApi.host,
-      port: savedApi.port,
-      path: savedApi.path,
-      key: savedApi.key,
-      model: savedApi.model,
-    };
+    cfg.api = apiForStorage(savedApi);
     saveConfig(cfg);
     console.log([
       "✅ API 配置已保存！",
       "",
       `🌐 Endpoint: ${savedApi.endpoint}`,
+      `📚 Models: ${savedApi.modelsEndpoint}`,
       `🧠 Model: ${savedApi.model}`,
       `🔑 Key: ${previewSecret(savedApi.key) || "未设置"}`,
       `📁 Config: ${CONFIG_PATH}`,
