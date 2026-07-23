@@ -1,6 +1,6 @@
 ---
 name: "niu-image-gen"
-description: "Generate or edit images using the Niu Image Gen plugin. Trigger when the user wants to create, draw, generate, or edit images via Niu Image Gen, wants batch image generation, needs AI-generated images saved to disk, or wants to modify an existing image (change background, remove object, change style, etc.). Do not use for the built-in image_gen tool or SVG/vector work."
+description: "Generate or edit images using configurable OpenAI-compatible image API endpoints. Trigger when the user wants to create, draw, generate, or edit images via Niu Image Gen, configure a custom image API host, port, path, key, or model, run batch image generation, save generated images, or modify an existing image. Do not use for the built-in image_gen tool or SVG/vector work."
 ---
 
 # Niu Image Gen 🎨
@@ -42,7 +42,16 @@ The output is JSON:
 
 ```json
 {
+  "api": {
+    "protocol": "https",
+    "host": "api.iiiiitoken.com",
+    "port": null,
+    "path": "/v1/images/generations",
+    "endpoint": "https://api.iiiiitoken.com/v1/images/generations",
+    "model": "gpt-image-2-x"
+  },
   "hasKey": true,
+  "keySource": "config.api.key",
   "keyPreview": "sk-1aa1...aa4d",
   "quickMode": { "quality": "2K", "ratio": "square", "count": 1 },
   "batchMode": { "quality": "2K", "ratio": "landscape", "concurrency": 3 }
@@ -71,7 +80,7 @@ Fields can be `null` if not yet configured.
 
 The user has never configured the plugin. Walk them through everything.
 
-### W1: Welcome + API Key 🔑
+### W1: Welcome + API Connection 🔌
 
 「📋 原样输出」
 
@@ -81,18 +90,40 @@ The user has never configured the plugin. Walk them through everything.
 >
 > ---
 >
-> 🔑 **第一步：请提供你的 API Key**
+> 🔌 **第一步：配置图片 API**
 >
-> 你可以粘贴 Key，将它以明文保存在本机 `~/.codex/niu-image-gen-config.json`；
-> 也可以自行设置环境变量 `NIU_IMAGE_GEN_API_KEY`，避免写入配置文件。
+> 当前默认连接：
 >
-> 生成或编辑图片时，Key 会发送给第三方 API `api.iiiiitoken.com` 用于认证。
+> - Endpoint: `https://api.iiiiitoken.com/v1/images/generations`
+> - Model: `gpt-image-2-x`
+>
+> 你可以直接提供 API Key 使用默认连接，也可以同时提供自定义协议、域名/IP、
+> 端口、请求路径和模型。
+>
+> Key 会以明文保存在本机 `~/.codex/niu-image-gen-config.json`。也可以使用
+> `NIU_IMAGE_GEN_API_KEY` 环境变量避免写入配置文件。生成或编辑时，Key、
+> 提示词和源图片会发送给你配置的 API。
 
-When the user provides their key, run:
+If the user accepts the current endpoint and only provides a key, run:
 
 ```bash
 node "$SCRIPT" --set-key <USER_KEY>
 ```
+
+For a custom endpoint, collect all required values and run:
+
+```bash
+node "$SCRIPT" --set-api \
+  --protocol <http|https> \
+  --host <DOMAIN_OR_IP> \
+  --port <PORT|default> \
+  --path </REQUEST_PATH> \
+  --model <MODEL> \
+  --key <USER_KEY>
+```
+
+`host` must not contain a scheme, path, or port. Use `default` to omit an
+explicit port and let the protocol choose it.
 
 **直接展示脚本输出，不要改写。** 脚本会输出格式化的确认信息。
 
@@ -211,7 +242,9 @@ The user wants to change settings. First run `--get-config` if not already done 
 > |------|------|------|------|
 > | ⚡ 快速模式 | [Q] | [R] | 每次 [N] 张 |
 > | 📦 批量模式 | [Q or 未设置] | [R or —] | 并发 [N or —] |
-> | 🔑 API Key | [preview] | | |
+> | 🔌 API Endpoint | [endpoint] | | |
+> | 🧠 API Model | [model] | | |
+> | 🔑 API Key | [preview] | [keySource] | |
 >
 > 要修改哪个？
 >
@@ -219,13 +252,19 @@ The user wants to change settings. First run `--get-config` if not already done 
 >
 > 2️⃣ 📦 批量模式
 >
-> 3️⃣ 🔑 API Key
+> 3️⃣ 🔌 API 连接
+>
+> 4️⃣ 🔑 只修改 API Key
 
 Based on user choice:
 
 - **1️⃣ Quick Mode**: Run W2 → W3 → W4 → W5 from Branch A2. This overwrites the existing quickMode config.
 - **2️⃣ Batch Mode**: Run the batch setup flow from Branch D (first-time section). This overwrites or creates batchMode config.
-- **3️⃣ API Key**: Ask for new key, run `--set-key <NEW_KEY>`. **直接展示脚本输出。**
+- **3️⃣ API connection**: Ask which fields should change: protocol, host, port,
+  path, model, and optionally key. Preserve fields the user does not change.
+  Run `--set-api` with only the changed flags. **直接展示脚本输出。**
+- **4️⃣ API Key only**: Ask for the new key and run `--set-key <NEW_KEY>`.
+  **直接展示脚本输出。**
 
 After saving, the script output already includes confirmation — do not add extra summary.
 
@@ -445,18 +484,27 @@ These rules apply to ALL branches:
 |-------|--------|
 | 503 "No available compatible accounts" | Wait 30s, retry once. If still fails, tell user the API is temporarily busy. |
 | 400 with size error | Fall back to closest valid size and retry. |
-| Timeout (generation 120s / edit 180s) | Report and offer to retry. |
+| Timeout (generation 220s / edit 250s) | Report and offer to retry. |
 | Missing API key | Guide through `--set-key` setup (Branch A W1). |
+| Invalid protocol, host, port, path, or model | Explain the invalid field and return to Branch C API connection setup. |
+| API response has no `data[0].b64_json` | Explain that the configured endpoint is not compatible with the plugin response contract. |
 
 ## Hard constraints
 
-- API base URL (`https://api.iiiiitoken.com/v1/images/generations`) and model (`gpt-image-2-x`) are hardcoded. **Never change them.**
-- Prefer `NIU_IMAGE_GEN_API_KEY` when the user does not want the key stored in the local config file.
-- `--set-key` stores the key in plaintext at `~/.codex/niu-image-gen-config.json`; generation and editing send it to the third-party API for authentication.
+- API protocol, host, port, path, key, and model are configurable under the
+  `api` object in `~/.codex/niu-image-gen-config.json`.
+- The endpoint must accept the plugin's OpenAI-compatible image request and
+  return base64 image data under `data[].b64_json`.
+- Protocol must be `http` or `https`; port must be `1` to `65535` or omitted.
+- Environment variables `NIU_IMAGE_GEN_API_PROTOCOL`, `NIU_IMAGE_GEN_API_HOST`,
+  `NIU_IMAGE_GEN_API_PORT`, `NIU_IMAGE_GEN_API_PATH`,
+  `NIU_IMAGE_GEN_API_KEY`, and `NIU_IMAGE_GEN_API_MODEL` override saved values.
+- `--set-key` and `--set-api --key` store the key in plaintext at
+  `~/.codex/niu-image-gen-config.json`; requests send it to the configured API.
 - **Never display the user's full API key in chat.**
 - Maximum batch size: 20 prompts per run.
 - Maximum concurrency: 10.
 - Maximum count (quick mode / edit variations): 4.
 - Maximum batch edit images: 10.
-- Generation timeout: 120s. Edit timeout: 180s.
+- Generation timeout: 220s. Edit timeout: 250s.
 - Pixel budget: ≤8,294,400 px. Longest edge ≤3,840. Dimensions divisible by 16.

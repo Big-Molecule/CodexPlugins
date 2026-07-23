@@ -1,16 +1,28 @@
 #!/usr/bin/env node
 
 // Derived from borawong/AiMaMi at commit 297c7af (Apache-2.0).
-// Modified by Big-Molecule on 2026-07-23: environment-key support and safer local storage.
+// Modified by Big-Molecule on 2026-07-23: configurable API endpoint, model, and credentials.
 
 import { chmodSync, writeFileSync, readFileSync, mkdirSync, existsSync } from "node:fs";
 import { join, dirname, basename } from "node:path";
 import { homedir } from "node:os";
 
-const API_BASE = "https://api.iiiiitoken.com/v1/images/generations";
-const MODEL = "gpt-image-2-x";
 const CONFIG_PATH = join(homedir(), ".codex", "niu-image-gen-config.json");
-const API_KEY_ENV = "NIU_IMAGE_GEN_API_KEY";
+const DEFAULT_API = Object.freeze({
+  protocol: "https",
+  host: "api.iiiiitoken.com",
+  port: null,
+  path: "/v1/images/generations",
+  model: "gpt-image-2-x",
+});
+const API_ENV = Object.freeze({
+  protocol: "NIU_IMAGE_GEN_API_PROTOCOL",
+  host: "NIU_IMAGE_GEN_API_HOST",
+  port: "NIU_IMAGE_GEN_API_PORT",
+  path: "NIU_IMAGE_GEN_API_PATH",
+  key: "NIU_IMAGE_GEN_API_KEY",
+  model: "NIU_IMAGE_GEN_API_MODEL",
+});
 
 const SIZE_MATRIX = {
   "1K": { square: "1024x1024", landscape: "1536x1024", portrait: "1024x1536" },
@@ -37,17 +49,109 @@ function saveConfig(cfg) {
   try { chmodSync(CONFIG_PATH, 0o600); } catch {}
 }
 
-function resolveApiKey(cfg = loadConfig()) {
-  return process.env[API_KEY_ENV] || cfg?.apiKey || null;
+function firstDefined(...values) {
+  return values.find((value) => value !== undefined && value !== null && value !== "");
 }
 
-function getApiKey() {
-  const apiKey = resolveApiKey();
-  if (!apiKey) {
-    console.error(`ERROR: API key not configured. Set ${API_KEY_ENV} or use --set-key.`);
+function normalizeProtocol(value) {
+  const protocol = String(value || "").trim().toLowerCase().replace(/:$/, "");
+  if (!["http", "https"].includes(protocol)) {
+    throw new Error('API protocol must be "http" or "https".');
+  }
+  return protocol;
+}
+
+function normalizeHost(value) {
+  const host = String(value || "").trim();
+  if (!host || host.includes("://") || /[/?#@\s]/.test(host)) {
+    throw new Error("API host must be a domain, IP address, or localhost without a scheme or path.");
+  }
+  if (host.includes(":") && !(host.startsWith("[") && host.endsWith("]"))) {
+    throw new Error("Put the API port in api.port instead of api.host.");
+  }
+  return host;
+}
+
+function normalizePort(value) {
+  if (
+    value === undefined ||
+    value === null ||
+    value === "" ||
+    String(value).toLowerCase() === "default"
+  ) {
+    return null;
+  }
+  const port = Number(value);
+  if (!Number.isInteger(port) || port < 1 || port > 65535) {
+    throw new Error("API port must be an integer from 1 to 65535, or default.");
+  }
+  return port;
+}
+
+function normalizePath(value) {
+  const path = String(value || "").trim();
+  if (!path) {
+    throw new Error("API path must not be empty.");
+  }
+  return `/${path.replace(/^\/+/, "")}`;
+}
+
+function normalizeModel(value) {
+  const model = String(value || "").trim();
+  if (!model) {
+    throw new Error("API model must not be empty.");
+  }
+  return model;
+}
+
+function previewSecret(value) {
+  if (!value) return null;
+  if (value.length <= 8) return `${value.slice(0, 2)}...${value.slice(-2)}`;
+  return `${value.slice(0, 8)}...${value.slice(-4)}`;
+}
+
+function resolveApiConfig(cfg = loadConfig(), { useEnv = true } = {}) {
+  const stored = cfg?.api && typeof cfg.api === "object" ? cfg.api : {};
+  const env = useEnv ? process.env : {};
+  const protocol = normalizeProtocol(
+    firstDefined(env[API_ENV.protocol], stored.protocol, DEFAULT_API.protocol)
+  );
+  const host = normalizeHost(
+    firstDefined(env[API_ENV.host], stored.host, stored.domain, DEFAULT_API.host)
+  );
+  const port = normalizePort(
+    firstDefined(env[API_ENV.port], stored.port, DEFAULT_API.port)
+  );
+  const path = normalizePath(
+    firstDefined(env[API_ENV.path], stored.path, DEFAULT_API.path)
+  );
+  const model = normalizeModel(
+    firstDefined(env[API_ENV.model], stored.model, DEFAULT_API.model)
+  );
+  const key = firstDefined(env[API_ENV.key], stored.key, cfg?.apiKey, null) || null;
+  const keySource = env[API_ENV.key]
+    ? API_ENV.key
+    : stored.key
+      ? "config.api.key"
+      : cfg?.apiKey
+        ? "legacy config.apiKey"
+        : null;
+
+  const authority = port === null ? host : `${host}:${port}`;
+  const endpoint = new URL(path, `${protocol}://${authority}/`).toString();
+
+  return { protocol, host, port, path, endpoint, key, keySource, model };
+}
+
+function getApiConfig() {
+  const api = resolveApiConfig();
+  if (!api.key) {
+    console.error(
+      `ERROR: API key not configured. Set ${API_ENV.key}, use --set-key, or add api.key to ${CONFIG_PATH}.`
+    );
     process.exit(1);
   }
-  return apiKey;
+  return api;
 }
 
 function timestamp() {
@@ -67,16 +171,16 @@ function resolveOutputDir(userDir) {
   return dir;
 }
 
-async function generate(apiKey, prompt, size, outputDir) {
+async function generate(api, prompt, size, outputDir) {
   const start = Date.now();
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 220_000);
 
   try {
-    const res = await fetch(API_BASE, {
+    const res = await fetch(api.endpoint, {
       method: "POST",
-      headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
-      body: JSON.stringify({ model: MODEL, prompt, n: 1, size }),
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${api.key}` },
+      body: JSON.stringify({ model: api.model, prompt, n: 1, size }),
       signal: controller.signal,
     });
     clearTimeout(timeout);
@@ -105,7 +209,7 @@ async function generate(apiKey, prompt, size, outputDir) {
   }
 }
 
-async function editImage(apiKey, imagePath, prompt, size, outputDir, count = 1, silent = false) {
+async function editImage(api, imagePath, prompt, size, outputDir, count = 1, silent = false) {
   if (!existsSync(imagePath)) {
     return { ok: false, elapsed: 0, error: `文件不存在: ${imagePath}`, sourceName: basename(imagePath) };
   }
@@ -126,10 +230,10 @@ async function editImage(apiKey, imagePath, prompt, size, outputDir, count = 1, 
   const timeout = setTimeout(() => controller.abort(), 250_000);
 
   try {
-    const res = await fetch(API_BASE, {
+    const res = await fetch(api.endpoint, {
       method: "POST",
-      headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
-      body: JSON.stringify({ model: MODEL, prompt, n: count, size, image: dataUrl }),
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${api.key}` },
+      body: JSON.stringify({ model: api.model, prompt, n: count, size, image: dataUrl }),
       signal: controller.signal,
     });
     clearTimeout(timeout);
@@ -175,7 +279,7 @@ async function editImage(apiKey, imagePath, prompt, size, outputDir, count = 1, 
   }
 }
 
-async function runBatchEdit(apiKey, imagePaths, prompt, size, concurrency, outputDir) {
+async function runBatchEdit(api, imagePaths, prompt, size, concurrency, outputDir) {
   const total = imagePaths.length;
   console.log(`\n✏️ 批量编辑 ${total} 张\n`);
 
@@ -188,7 +292,7 @@ async function runBatchEdit(apiKey, imagePaths, prompt, size, concurrency, outpu
       const idx = nextIdx++;
       const imagePath = imagePaths[idx];
       console.log(`⏳ [${idx + 1}/${total}] ${basename(imagePath)}`);
-      const result = await editImage(apiKey, imagePath, prompt, size, outputDir, 1, true);
+      const result = await editImage(api, imagePath, prompt, size, outputDir, 1, true);
       results[idx] = result;
       if (result.ok) {
         console.log(`✅ [${idx + 1}/${total}] ${(result.elapsed / 1000).toFixed(1)}s`);
@@ -217,7 +321,7 @@ async function runBatchEdit(apiKey, imagePaths, prompt, size, concurrency, outpu
   return fail.length > 0 ? 1 : 0;
 }
 
-async function batchGenerate(apiKey, prompts, size, concurrency, outputDir, isVariation = false) {
+async function batchGenerate(api, prompts, size, concurrency, outputDir, isVariation = false) {
   const total = prompts.length;
   const results = new Array(total);
   let nextIdx = 0;
@@ -231,7 +335,7 @@ async function batchGenerate(apiKey, prompts, size, concurrency, outputDir, isVa
       } else {
         console.log(`[${idx + 1}/${total}] 生成中: "${prompt.slice(0, 30)}${prompt.length > 30 ? "..." : ""}"`);
       }
-      const result = await generate(apiKey, prompt, size, outputDir);
+      const result = await generate(api, prompt, size, outputDir);
       results[idx] = { prompt, ...result };
       if (result.ok) {
         console.log(`✅ [${idx + 1}/${total}] ${(result.elapsed / 1000).toFixed(1)}s`);
@@ -245,13 +349,13 @@ async function batchGenerate(apiKey, prompts, size, concurrency, outputDir, isVa
   return results;
 }
 
-async function runBatch(apiKey, prompts, size, concurrency, outputDir, isVariation = false) {
+async function runBatch(api, prompts, size, concurrency, outputDir, isVariation = false) {
   if (!isVariation) {
     console.log(`\n📦 批量 ${prompts.length} 张\n`);
   }
 
   const startAll = Date.now();
-  const results = await batchGenerate(apiKey, prompts, size, concurrency, outputDir, isVariation);
+  const results = await batchGenerate(api, prompts, size, concurrency, outputDir, isVariation);
   const totalTime = Date.now() - startAll;
 
   const ok = results.filter((r) => r.ok);
@@ -289,8 +393,15 @@ function printUsage() {
 CONFIG:
   --get-config                              Show current config (JSON)
   --set-key <key>                           Save API key
+  --set-api [--protocol http|https] [--host HOST] [--port PORT|default]
+            [--path PATH] [--model MODEL] [--key KEY]
+                                              Save API endpoint, model, and optional key
   --set-quick-mode --quality Q --ratio R --count N   Save quick mode defaults
   --set-batch-mode --quality Q --ratio R --concurrency N   Save batch mode defaults
+
+API ENVIRONMENT OVERRIDES:
+  NIU_IMAGE_GEN_API_PROTOCOL, NIU_IMAGE_GEN_API_HOST, NIU_IMAGE_GEN_API_PORT
+  NIU_IMAGE_GEN_API_PATH, NIU_IMAGE_GEN_API_KEY, NIU_IMAGE_GEN_API_MODEL
 
 GENERATE:
   --prompt "..."  [--quality Q] [--ratio R] [--count N] [--output-dir D]
@@ -320,6 +431,13 @@ function parseArgs(argv) {
     const a = argv[i];
     if      (a === "--get-config")                  args.flags.getConfig = true;
     else if (a === "--set-key" && argv[i + 1])      args.flags.setKey = argv[++i];
+    else if (a === "--set-api")                      args.flags.setApi = true;
+    else if (a === "--protocol" && argv[i + 1])      args.flags.protocol = argv[++i];
+    else if (a === "--host" && argv[i + 1])          args.flags.host = argv[++i];
+    else if (a === "--port" && argv[i + 1])          args.flags.port = argv[++i];
+    else if (a === "--path" && argv[i + 1])          args.flags.apiPath = argv[++i];
+    else if (a === "--model" && argv[i + 1])         args.flags.model = argv[++i];
+    else if (a === "--key" && argv[i + 1])           args.flags.apiKey = argv[++i];
     else if (a === "--set-quick-mode")               args.flags.setQuickMode = true;
     else if (a === "--set-batch-mode")                args.flags.setBatchMode = true;
     else if (a === "--prompt" && argv[i + 1])         args.prompts.push(argv[++i]);
@@ -350,27 +468,85 @@ async function main() {
 
   if (flags.getConfig) {
     const cfg = loadConfig();
-    const apiKey = resolveApiKey(cfg);
+    const api = resolveApiConfig(cfg);
     console.log(JSON.stringify({
-      hasKey: !!apiKey,
-      keySource: process.env[API_KEY_ENV] ? API_KEY_ENV : (cfg?.apiKey ? "config" : null),
-      keyPreview: apiKey ? apiKey.slice(0, 8) + "..." + apiKey.slice(-4) : null,
+      api: {
+        protocol: api.protocol,
+        host: api.host,
+        port: api.port,
+        path: api.path,
+        endpoint: api.endpoint,
+        model: api.model,
+      },
+      hasKey: !!api.key,
+      keySource: api.keySource,
+      keyPreview: previewSecret(api.key),
       quickMode: cfg?.quickMode || null,
       batchMode: cfg?.batchMode || null,
     }, null, 2));
     process.exit(0);
   }
 
+  if (flags.setApi) {
+    const hasApiOption = [
+      flags.protocol,
+      flags.host,
+      flags.port,
+      flags.apiPath,
+      flags.model,
+      flags.apiKey,
+    ].some((value) => value !== undefined);
+    if (!hasApiOption) {
+      console.error("ERROR: --set-api requires at least one API option.");
+      process.exit(1);
+    }
+
+    const cfg = loadConfig() || {};
+    const current = resolveApiConfig(cfg, { useEnv: false });
+    cfg.api = {
+      protocol: firstDefined(flags.protocol, current.protocol),
+      host: firstDefined(flags.host, current.host),
+      port: flags.port === undefined ? current.port : normalizePort(flags.port),
+      path: firstDefined(flags.apiPath, current.path),
+      key: firstDefined(flags.apiKey, current.key),
+      model: firstDefined(flags.model, current.model),
+    };
+    delete cfg.apiKey;
+    const savedApi = resolveApiConfig(cfg, { useEnv: false });
+    cfg.api = {
+      protocol: savedApi.protocol,
+      host: savedApi.host,
+      port: savedApi.port,
+      path: savedApi.path,
+      key: savedApi.key,
+      model: savedApi.model,
+    };
+    saveConfig(cfg);
+    console.log([
+      "✅ API 配置已保存！",
+      "",
+      `🌐 Endpoint: ${savedApi.endpoint}`,
+      `🧠 Model: ${savedApi.model}`,
+      `🔑 Key: ${previewSecret(savedApi.key) || "未设置"}`,
+      `📁 Config: ${CONFIG_PATH}`,
+    ].join("\n"));
+    process.exit(0);
+  }
+
   if (flags.setKey) {
     const cfg = loadConfig() || {};
-    cfg.apiKey = flags.setKey;
+    cfg.api = {
+      ...(cfg.api && typeof cfg.api === "object" ? cfg.api : {}),
+      key: flags.setKey,
+    };
+    delete cfg.apiKey;
     saveConfig(cfg);
-    const preview = flags.setKey.slice(0, 8) + "..." + flags.setKey.slice(-4);
+    const api = resolveApiConfig(cfg, { useEnv: false });
     console.log(
       `✅ API Key 已保存到本地配置文件！\n\n` +
-      `🔑 Key: ${preview}\n` +
+      `🔑 Key: ${previewSecret(flags.setKey)}\n` +
       `📁 ${CONFIG_PATH}\n` +
-      `🌐 生成或编辑图片时，该 Key 会发送给 ${new URL(API_BASE).host} 用于 API 认证`
+      `🌐 生成或编辑图片时，该 Key 会发送给 ${api.endpoint} 用于 API 认证`
     );
     process.exit(0);
   }
@@ -436,7 +612,7 @@ async function main() {
     if (images.length === 0) { console.error("ERROR: --edit requires --image <path>"); process.exit(1); }
     if (prompts.length === 0) { console.error("ERROR: --edit requires --prompt <text>"); process.exit(1); }
 
-    const apiKey = getApiKey();
+    const api = getApiConfig();
     const cfg = loadConfig();
     const qm = cfg?.quickMode;
     const quality = (flags.quality || qm?.quality || DEFAULTS.quality).toUpperCase();
@@ -448,13 +624,13 @@ async function main() {
     if (images.length > 1) {
       const bm = cfg?.batchMode;
       const concurrency = Math.max(1, Math.min(flags.concurrency ?? bm?.concurrency ?? DEFAULTS.concurrency, 10));
-      process.exit(await runBatchEdit(apiKey, images, prompts[0], size, concurrency, outputDir));
+      process.exit(await runBatchEdit(api, images, prompts[0], size, concurrency, outputDir));
     }
 
     const count = Math.max(1, Math.min(flags.count ?? 1, 4));
 
     if (count > 1) {
-      const result = await editImage(apiKey, images[0], prompts[0], size, outputDir, count);
+      const result = await editImage(api, images[0], prompts[0], size, outputDir, count);
       if (result.ok) {
         const NUM = ["①", "②", "③", "④"];
         const totalMB = result.results.reduce((sum, r) => sum + parseFloat(r.fileSize), 0).toFixed(2);
@@ -470,7 +646,7 @@ async function main() {
       process.exit(0);
     }
 
-    const result = await editImage(apiKey, images[0], prompts[0], size, outputDir);
+    const result = await editImage(api, images[0], prompts[0], size, outputDir);
     if (result.ok) {
       console.log(`✏️ "${prompts[0]}"\n\n✅ ${(result.elapsed / 1000).toFixed(1)}s ｜ ${result.fileSize}\n📍 ${result.path}\n🖼️ 原图: ${result.sourceName}`);
     } else {
@@ -482,7 +658,7 @@ async function main() {
 
   // ── Generation commands (need API key) ──
 
-  const apiKey = getApiKey();
+  const api = getApiConfig();
   const cfg = loadConfig();
   const isBatch = !!flags.batchFile || !!flags.batchInline;
 
@@ -517,14 +693,14 @@ async function main() {
       console.error("ERROR: Batch file must be a JSON array of prompt strings.");
       process.exit(1);
     }
-    process.exit(await runBatch(apiKey, bp, size, concurrency, outputDir));
+    process.exit(await runBatch(api, bp, size, concurrency, outputDir));
   }
 
   // Batch inline
   if (flags.batchInline && prompts.length >= 1) {
     const bm = cfg?.batchMode;
     const concurrency = Math.max(1, Math.min(flags.concurrency ?? bm?.concurrency ?? DEFAULTS.concurrency, 10));
-    process.exit(await runBatch(apiKey, prompts, size, concurrency, outputDir));
+    process.exit(await runBatch(api, prompts, size, concurrency, outputDir));
   }
 
   // Single prompt — resolve count from flag → quickMode config → default
@@ -534,13 +710,13 @@ async function main() {
 
   if (count > 1) {
     console.log();
-    process.exit(await runBatch(apiKey, Array(count).fill(prompt), size, Math.min(count, 4), outputDir, true));
+    process.exit(await runBatch(api, Array(count).fill(prompt), size, Math.min(count, 4), outputDir, true));
   }
 
   // Single image
   console.log(`\n⏳ 生成中...\n`);
 
-  const result = await generate(apiKey, prompt, size, outputDir);
+  const result = await generate(api, prompt, size, outputDir);
   if (result.ok) {
     console.log(`🎨 "${prompt}"\n\n✅ ${(result.elapsed / 1000).toFixed(1)}s ｜ ${result.fileSize}\n📍 ${result.path}`);
   } else {
@@ -549,4 +725,7 @@ async function main() {
   }
 }
 
-main();
+main().catch((error) => {
+  console.error(`ERROR: ${error.message}`);
+  process.exit(1);
+});

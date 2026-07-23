@@ -1,7 +1,7 @@
 {
   "name": "niu-image-gen",
-  "version": "1.1.0+big-molecule.1",
-  "description": "Big-Molecule-maintained derivative of Niu Image Gen for third-party image generation, editing, and batch workflows.",
+  "version": "1.2.0+codex.20260723101411",
+  "description": "Generate and edit images through configurable OpenAI-compatible API endpoints, with batch workflows and local settings.",
   "author": {
     "name": "BORAWONG and Big-Molecule",
     "url": "https://github.com/Big-Molecule"
@@ -9,17 +9,27 @@
   "homepage": "https://github.com/Big-Molecule/CodexPlugins/tree/main/plugins/niu-image-gen",
   "repository": "https://github.com/Big-Molecule/CodexPlugins",
   "license": "Apache-2.0",
-  "keywords": ["image-generation", "image-editing", "batch", "third-party-api"],
+  "keywords": [
+    "image-generation",
+    "image-editing",
+    "batch",
+    "custom-api",
+    "openai-compatible"
+  ],
   "skills": "./skills/",
   "interface": {
     "displayName": "Niu Image Gen",
-    "shortDescription": "AI image generation with batch mode, quality & ratio selection.",
-    "longDescription": "Generate and edit images through a third-party API. Includes quality and aspect-ratio controls, local configuration, batch generation, and concurrent processing. This is a maintained derivative of BORAWONG's original plugin.",
+    "shortDescription": "Image generation with configurable API endpoints and batch mode.",
+    "longDescription": "Generate and edit images through configurable OpenAI-compatible APIs. Customize protocol, host, port, request path, API key, and model while retaining quality controls, batch generation, concurrent processing, and local settings.",
     "developerName": "BORAWONG / Big-Molecule",
     "category": "Productivity",
-    "capabilities": ["Write"],
+    "capabilities": [
+      "Write"
+    ],
     "composerIcon": "./assets/logo.png",
     "logo": "./assets/logo.png",
-    "defaultPrompt": ["I want to generate some images"]
+    "defaultPrompt": [
+      "I want to generate some images"
+    ]
   }
 }

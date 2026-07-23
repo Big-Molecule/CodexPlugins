@@ -21,5 +21,13 @@ jobs:
         with:
           python-version: "3.12"
 
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
       - name: Validate marketplace and plugins
         run: python scripts/validate_repository.py
+
+      - name: Test Niu Image Gen
+        run: node --test plugins/niu-image-gen/tests/generate.test.mjs

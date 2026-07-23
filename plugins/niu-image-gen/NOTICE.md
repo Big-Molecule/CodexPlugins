@@ -17,6 +17,9 @@ Modified on 2026-07-23:
 - Added repository, license, maintenance, and marketplace metadata.
 - Replaced the fixed `$HOME/plugins/...` script assumption with installed-path resolution.
 - Added `NIU_IMAGE_GEN_API_KEY` support.
+- Added configurable protocol, host, port, request path, API key, and model.
+- Added environment-variable overrides for every API connection field.
+- Added backward-compatible migration from the legacy top-level `apiKey`.
 - Restricted the local configuration file to owner access where the operating system supports it.
 - Clarified that locally stored API credentials are sent to the configured third-party API during requests.
 
