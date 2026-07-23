@@ -1,0 +1,7 @@
+{
+  "name": "big-molecule-codex-plugins",
+  "interface": {
+    "displayName": "Big Molecule Codex Plugins"
+  },
+  "plugins": []
+}
