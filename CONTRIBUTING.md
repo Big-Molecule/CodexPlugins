@@ -43,4 +43,5 @@ The same validation runs in GitHub Actions.
 - Keep `policy.installation` and `policy.authentication` explicit.
 - Default public plugins to `AVAILABLE` and `ON_INSTALL`.
 - Do not add product gating unless it is required and documented.
+- Preserve upstream copyright, license, and attribution notices when importing code.
 - Do not publish secrets or machine-specific absolute paths.

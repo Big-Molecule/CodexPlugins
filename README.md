@@ -6,6 +6,16 @@
 `.agents/plugins/marketplace.json`，每个插件位于 `plugins/<plugin-name>/`。
 用户添加本 GitHub 仓库后，即可在 Codex 中浏览并安装清单内的插件。
 
+## 已发布插件
+
+| 插件 | 功能 | 来源 |
+|------|------|------|
+| `niu-image-gen` | 通过第三方 API 生成、编辑和批量处理图片 | 基于 [borawong/AiMaMi](https://github.com/borawong/AiMaMi) 的 Apache-2.0 授权代码 |
+
+`niu-image-gen` 会把 API Key 保存在本机配置文件中，或从
+`NIU_IMAGE_GEN_API_KEY` 环境变量读取。执行图片生成或编辑时，Key 和请求内容
+会发送给插件配置的第三方 API。
+
 ## 用户安装
 
 将本仓库推送到 `Big-Molecule/CodexPlugins` 后，添加 marketplace：
@@ -103,4 +113,5 @@ python scripts/validate_repository.py
 
 ## License
 
-[MIT](LICENSE)
+仓库自有脚本和文档默认采用 [MIT](LICENSE)；包含上游代码的插件可能使用
+各自目录内声明的许可证。完整边界见 [LICENSES.md](LICENSES.md)。

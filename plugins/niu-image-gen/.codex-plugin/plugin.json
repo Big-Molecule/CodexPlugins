@@ -1,0 +1,25 @@
+{
+  "name": "niu-image-gen",
+  "version": "1.1.0+big-molecule.1",
+  "description": "Big-Molecule-maintained derivative of Niu Image Gen for third-party image generation, editing, and batch workflows.",
+  "author": {
+    "name": "BORAWONG and Big-Molecule",
+    "url": "https://github.com/Big-Molecule"
+  },
+  "homepage": "https://github.com/Big-Molecule/CodexPlugins/tree/main/plugins/niu-image-gen",
+  "repository": "https://github.com/Big-Molecule/CodexPlugins",
+  "license": "Apache-2.0",
+  "keywords": ["image-generation", "image-editing", "batch", "third-party-api"],
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "Niu Image Gen",
+    "shortDescription": "AI image generation with batch mode, quality & ratio selection.",
+    "longDescription": "Generate and edit images through a third-party API. Includes quality and aspect-ratio controls, local configuration, batch generation, and concurrent processing. This is a maintained derivative of BORAWONG's original plugin.",
+    "developerName": "BORAWONG / Big-Molecule",
+    "category": "Productivity",
+    "capabilities": ["Write"],
+    "composerIcon": "./assets/logo.png",
+    "logo": "./assets/logo.png",
+    "defaultPrompt": ["I want to generate some images"]
+  }
+}

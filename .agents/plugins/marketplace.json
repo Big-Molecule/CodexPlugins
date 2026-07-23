@@ -3,5 +3,18 @@
   "interface": {
     "displayName": "Big Molecule Codex Plugins"
   },
-  "plugins": []
+  "plugins": [
+    {
+      "name": "niu-image-gen",
+      "source": {
+        "source": "local",
+        "path": "./plugins/niu-image-gen"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Productivity"
+    }
+  ]
 }
